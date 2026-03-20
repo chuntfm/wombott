@@ -2,6 +2,7 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
+from typing import Dict, List, Optional
 
 import httpx
 from dotenv import load_dotenv
@@ -35,7 +36,7 @@ Duration: ~{duration} min
 LIVE_MESSAGE_TEMPLATE = os.getenv("LIVE_MESSAGE_TEMPLATE", DEFAULT_LIVE_TEMPLATE)
 
 
-def fetch_now_playing() -> list[dict]:
+def fetch_now_playing() -> List[Dict]:
     resp = httpx.get(API_URL, timeout=15)
     resp.raise_for_status()
     return resp.json()
@@ -64,7 +65,8 @@ def format_message(show: dict) -> str:
     start_str = ""
     if start_raw:
         try:
-            start_dt = datetime.fromisoformat(start_raw)
+            # strptime handles timezone offsets across all Python 3.x
+            start_dt = datetime.strptime(start_raw, "%Y-%m-%dT%H:%M:%S%z")
             start_str = start_dt.strftime("%H:%M UTC%z")
         except ValueError:
             start_str = start_raw
@@ -106,7 +108,7 @@ def main() -> None:
         "Starting wombott -- polling %s every %ds", API_URL, POLL_INTERVAL
     )
 
-    last_seen_title: str | None = None
+    last_seen_title = None  # type: Optional[str]
 
     while True:
         try:
