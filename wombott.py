@@ -25,15 +25,11 @@ TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 NOTIFY_RESTREAMS = os.getenv("NOTIFY_RESTREAMS", "false").lower() == "true"
 NOTIFY_NOT_LIVE = os.getenv("NOTIFY_NOT_LIVE", "false").lower() == "true"
 
-DEFAULT_LIVE_TEMPLATE = """\
-<b>{title}</b>
+DEFAULT_LIVE_TEMPLATE = "{show}"
 
-Started: {start}
-Duration: ~{duration} min
-{description}
-{show_url}"""
-
-LIVE_MESSAGE_TEMPLATE = os.getenv("LIVE_MESSAGE_TEMPLATE", DEFAULT_LIVE_TEMPLATE)
+LIVE_MESSAGE_TEMPLATE = os.getenv("LIVE_MESSAGE_TEMPLATE", DEFAULT_LIVE_TEMPLATE).replace(
+    "\\n", "\n"
+)
 
 
 def fetch_now_playing() -> List[Dict]:
@@ -55,36 +51,40 @@ def should_notify(show: dict) -> bool:
     return False
 
 
-def format_message(show: dict) -> str:
-    title = show.get("title", "Unknown")
-    description = show.get("description") or ""
-    show_url = show.get("show_url") or ""
-    duration_secs = show.get("duration")
-    start_raw = show.get("start")
+def build_show_block(show: dict) -> str:
+    """Build show info block dynamically from available fields."""
+    lines = []
 
-    start_str = ""
+    title = show.get("title")
+    if title:
+        lines.append("<b>%s</b>" % title)
+
+    start_raw = show.get("start")
     if start_raw:
         try:
-            # strptime handles timezone offsets across all Python 3.x
             start_dt = datetime.strptime(start_raw, "%Y-%m-%dT%H:%M:%S%z")
-            start_str = start_dt.strftime("%H:%M UTC%z")
+            lines.append("Started: %s" % start_dt.strftime("%H:%M UTC%z"))
         except ValueError:
-            start_str = start_raw
+            lines.append("Started: %s" % start_raw)
 
-    duration_str = str(round(duration_secs / 60)) if duration_secs else ""
+    duration_secs = show.get("duration")
+    if duration_secs:
+        lines.append("Duration: ~%d min" % round(duration_secs / 60))
 
-    text = LIVE_MESSAGE_TEMPLATE.format(
-        title=title,
-        description=description,
-        show_url=show_url,
-        start=start_str,
-        duration=duration_str,
-    )
+    description = show.get("description")
+    if description:
+        lines.append(description)
 
-    # collapse blank lines from empty fields
-    lines = text.split("\n")
-    cleaned = [line for line in lines if line.strip()]
-    return "\n".join(cleaned)
+    show_url = show.get("show_url")
+    if show_url:
+        lines.append(show_url)
+
+    return "\n".join(lines)
+
+
+def format_message(show: dict) -> str:
+    show_block = build_show_block(show)
+    return LIVE_MESSAGE_TEMPLATE.format(show=show_block)
 
 
 def send_telegram_message(text: str) -> None:
