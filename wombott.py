@@ -1,7 +1,8 @@
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import httpx
@@ -26,8 +27,18 @@ NOTIFY_RESTREAMS = os.getenv("NOTIFY_RESTREAMS", "false").lower() == "true"
 NOTIFY_NOT_LIVE = os.getenv("NOTIFY_NOT_LIVE", "false").lower() == "true"
 
 DEFAULT_LIVE_TEMPLATE = "{show}"
-
 LIVE_MESSAGE_TEMPLATE = os.getenv("LIVE_MESSAGE_TEMPLATE", DEFAULT_LIVE_TEMPLATE).replace(
+    "\\n", "\n"
+)
+
+ARCHIVE_URL = os.getenv(
+    "ARCHIVE_URL", "https://assets.chunt.org/mixcloud_archive.slim.json"
+)
+ARCHIVE_CHECK_INTERVAL = int(os.getenv("ARCHIVE_CHECK_INTERVAL", "3600"))
+ARCHIVE_LOOKBACK_HOURS = int(os.getenv("ARCHIVE_LOOKBACK_HOURS", "48"))
+ARCHIVE_STATE_FILE = Path(os.getenv("ARCHIVE_STATE_FILE", ".wombott_last_archive"))
+DEFAULT_ARCHIVE_TEMPLATE = "{show}"
+ARCHIVE_MESSAGE_TEMPLATE = os.getenv("ARCHIVE_MESSAGE_TEMPLATE", DEFAULT_ARCHIVE_TEMPLATE).replace(
     "\\n", "\n"
 )
 
@@ -87,6 +98,91 @@ def format_message(show: dict) -> str:
     return LIVE_MESSAGE_TEMPLATE.format(show=show_block)
 
 
+def build_archive_block(entry: dict) -> str:
+    """Build archive show info block dynamically from available fields."""
+    lines = []
+
+    info = entry.get("info", {})
+    title = info.get("title") or entry.get("name")
+    if title:
+        lines.append("<b>%s</b>" % title)
+
+    date = info.get("date")
+    if date:
+        lines.append("Date: %s" % date)
+
+    audio_length = entry.get("audio_length")
+    if audio_length:
+        lines.append("Duration: ~%d min" % round(audio_length / 60))
+
+    tags = info.get("tags")
+    if tags:
+        lines.append("Tags: %s" % ", ".join(tags))
+
+    url = entry.get("url")
+    if url:
+        lines.append(url)
+
+    return "\n".join(lines)
+
+
+def format_archive_message(entry: dict) -> str:
+    show_block = build_archive_block(entry)
+    return ARCHIVE_MESSAGE_TEMPLATE.format(show=show_block)
+
+
+def read_last_archive_url() -> Optional[str]:
+    if ARCHIVE_STATE_FILE.exists():
+        return ARCHIVE_STATE_FILE.read_text().strip() or None
+    return None
+
+
+def write_last_archive_url(url: str) -> None:
+    ARCHIVE_STATE_FILE.write_text(url)
+
+
+def check_archive() -> None:
+    resp = httpx.get(ARCHIVE_URL, timeout=30)
+    resp.raise_for_status()
+    archive = resp.json()
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=ARCHIVE_LOOKBACK_HOURS)
+    last_posted_url = read_last_archive_url()
+
+    # filter to recent shows within lookback window
+    recent = []
+    for entry in archive:
+        date_str = entry.get("info", {}).get("date")
+        if not date_str:
+            continue
+        try:
+            entry_date = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        if entry_date < cutoff:
+            break  # list is sorted newest-first, so we can stop
+        recent.append(entry)
+
+    # find entries newer than the last posted one
+    new_entries = []
+    for entry in recent:
+        if entry.get("url") == last_posted_url:
+            break
+        new_entries.append(entry)
+
+    if not new_entries:
+        log.info("No new archive entries.")
+        return
+
+    # post oldest first so channel reads chronologically
+    for entry in reversed(new_entries):
+        log.info("New archive entry: %s", entry.get("name"))
+        send_telegram_message(format_archive_message(entry))
+
+    # save the newest one as last posted
+    write_last_archive_url(new_entries[0]["url"])
+
+
 def send_telegram_message(text: str) -> None:
     resp = httpx.post(
         f"{TELEGRAM_API}/sendMessage",
@@ -105,12 +201,15 @@ def send_telegram_message(text: str) -> None:
 
 def main() -> None:
     log.info(
-        "Starting wombott -- polling %s every %ds", API_URL, POLL_INTERVAL
+        "Starting wombott -- polling %s every %ds, archive check every %ds",
+        API_URL, POLL_INTERVAL, ARCHIVE_CHECK_INTERVAL,
     )
 
     last_seen_title = None  # type: Optional[str]
+    last_archive_check = 0.0
 
     while True:
+        # live show check
         try:
             shows = fetch_now_playing()
             current_title = shows[0].get("title") if shows else None
@@ -127,7 +226,17 @@ def main() -> None:
         except httpx.HTTPError as exc:
             log.error("API request failed: %s", exc)
         except Exception:
-            log.exception("Unexpected error in poll loop")
+            log.exception("Unexpected error in live show poll")
+
+        # archive check (on its own interval)
+        if time.time() - last_archive_check >= ARCHIVE_CHECK_INTERVAL:
+            try:
+                check_archive()
+            except httpx.HTTPError as exc:
+                log.error("Archive request failed: %s", exc)
+            except Exception:
+                log.exception("Unexpected error in archive check")
+            last_archive_check = time.time()
 
         time.sleep(POLL_INTERVAL)
 
