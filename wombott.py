@@ -5,6 +5,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import sys
+
 import httpx
 from dotenv import load_dotenv
 
@@ -13,8 +15,11 @@ load_dotenv()
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
+    stream=sys.stdout,
 )
 log = logging.getLogger("wombott")
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHANNEL_ID = os.environ["TELEGRAM_CHANNEL_ID"]
