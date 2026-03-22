@@ -210,23 +210,31 @@ def main() -> None:
         API_URL, POLL_INTERVAL, ARCHIVE_CHECK_INTERVAL,
     )
 
-    last_seen_title = None  # type: Optional[str]
+    last_seen_state = None  # type: Optional[tuple]
     last_archive_check = 0.0
 
     while True:
         # live show check
         try:
             shows = fetch_now_playing()
-            current_title = shows[0].get("title") if shows else None
+            if shows:
+                show = shows[0]
+                current_state = (
+                    show.get("title"),
+                    show.get("restream", False),
+                    show.get("not_live", False),
+                )
+            else:
+                show = None
+                current_state = None
 
-            if current_title != last_seen_title:
-                log.info("Now playing changed: %s -> %s", last_seen_title, current_title)
-                last_seen_title = current_title
+            if current_state != last_seen_state:
+                log.info("State changed: %s -> %s", last_seen_state, current_state)
+                last_seen_state = current_state
 
-                for show in shows:
-                    if should_notify(show):
-                        log.info("New show detected: %s", show.get("title"))
-                        send_telegram_message(format_message(show))
+                if show and should_notify(show):
+                    log.info("New live show detected: %s", show.get("title"))
+                    send_telegram_message(format_message(show))
 
         except httpx.HTTPError as exc:
             log.error("API request failed: %s", exc)
