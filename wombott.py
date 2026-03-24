@@ -23,7 +23,8 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHANNEL_ID = os.environ["TELEGRAM_CHANNEL_ID"]
-POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "60"))
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "180"))
+CONFIRM_SECONDS = int(os.getenv("CONFIRM_SECONDS", "60"))
 API_URL = os.getenv(
     "API_URL", "https://api.chunt.org/fm/channels/1/now-playing"
 )
@@ -211,6 +212,9 @@ def main() -> None:
     )
 
     last_seen_state = None  # type: Optional[tuple]
+    pending_show = None  # type: Optional[dict]
+    pending_state = None  # type: Optional[tuple]
+    pending_since = 0.0
     last_archive_check = 0.0
 
     while True:
@@ -233,8 +237,24 @@ def main() -> None:
                 last_seen_state = current_state
 
                 if show and should_notify(show):
-                    log.info("New live show detected: %s", show.get("title"))
-                    send_telegram_message(format_message(show))
+                    # start confirmation timer
+                    log.info("Pending live show: %s (confirming for %ds)", show.get("title"), CONFIRM_SECONDS)
+                    pending_show = show
+                    pending_state = current_state
+                    pending_since = time.time()
+                else:
+                    # state changed to something non-notifiable, clear pending
+                    pending_show = None
+                    pending_state = None
+
+            # check if pending show has been live long enough
+            if pending_show and current_state == pending_state:
+                elapsed = time.time() - pending_since
+                if elapsed >= CONFIRM_SECONDS:
+                    log.info("Confirmed live show: %s (live for %ds)", pending_show.get("title"), int(elapsed))
+                    send_telegram_message(format_message(pending_show))
+                    pending_show = None
+                    pending_state = None
 
         except httpx.HTTPError as exc:
             log.error("API request failed: %s", exc)
