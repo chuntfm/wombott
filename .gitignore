@@ -240,3 +240,4 @@ dmypy.json
 cython_debug/
 
 CLAUDE.md
+tasks/

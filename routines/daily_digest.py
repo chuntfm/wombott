@@ -87,7 +87,7 @@ def main() -> None:
     schedule = fetch_schedule()
     fortune = random_chunted_fortune()
 
-    message = f"gm!\n\n<b>today's schedule:</b>\n{weather}\n\n<b>today's schedule:</b>\n{schedule}\n\n<i>and remember: {fortune}</i>"
+    message = f"gm!\n\n<b>today's weather:</b>\n{weather}\n\n<b>today's schedule:</b>\n{schedule}\n\nremember: <i>{fortune}</i>"
 
     send_telegram_message(message)
     log.info("Done.")
