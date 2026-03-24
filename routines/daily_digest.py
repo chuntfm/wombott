@@ -56,8 +56,16 @@ def fetch_schedule() -> str:
 
     lines = []
     for show in shows:
-        start = show.get("startTimeUK", "?")
-        end = show.get("endTimeUK", "?")
+        start_raw = show.get("startTimestampUTC", "")
+        end_raw = show.get("endTimestampUTC", "")
+        try:
+            start = datetime.fromisoformat(start_raw).strftime("%H:%M")
+        except ValueError:
+            start = "?"
+        try:
+            end = datetime.fromisoformat(end_raw).strftime("%H:%M")
+        except ValueError:
+            end = "?"
         title = show.get("title", "Unknown")
         lines.append(f"{start}-{end} {title}")
 
@@ -87,7 +95,7 @@ def main() -> None:
     schedule = fetch_schedule()
     fortune = random_chunted_fortune()
 
-    message = f"gm!\n\n<b>today's weather:</b>\n{weather}\n\n<b>today's schedule:</b>\n{schedule}\n\nremember: <i>{fortune}</i>"
+    message = f"gm!\n\n<b>today's weather:</b>\n{weather}\n\n<b>today's schedule (UTC):</b>\n{schedule}\n\nremember: <i>{fortune}</i>"
 
     send_telegram_message(message)
     log.info("Done.")
