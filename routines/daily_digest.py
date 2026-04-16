@@ -42,7 +42,9 @@ def fetch_weather() -> str:
 
 def fetch_schedule() -> str:
     """Fetch today's schedule and format as a list of shows."""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    now_utc = datetime.now(timezone.utc)
+    today_date = now_utc.date()
+    today = now_utc.strftime("%Y-%m-%d")
     resp = httpx.get(
         SCHEDULE_API_URL,
         params={"time": today},
@@ -59,15 +61,31 @@ def fetch_schedule() -> str:
         start_raw = show.get("startTimestampUTC", "")
         end_raw = show.get("endTimestampUTC", "")
         try:
-            start = datetime.fromisoformat(start_raw).strftime("%H:%M")
+            start_dt = datetime.fromisoformat(start_raw)
+            start = start_dt.strftime("%H:%M")
         except ValueError:
+            start_dt = None
             start = "?"
         try:
-            end = datetime.fromisoformat(end_raw).strftime("%H:%M")
+            end_dt = datetime.fromisoformat(end_raw)
+            end = end_dt.strftime("%H:%M")
         except ValueError:
+            end_dt = None
             end = "?"
+
+        # label shows that span midnight
+        day_prefix = ""
+        if start_dt and start_dt.date() < today_date:
+            day_prefix = "(yesterday) "
+        elif start_dt and start_dt.date() > today_date:
+            day_prefix = "(tomorrow) "
+
+        day_suffix = ""
+        if end_dt and end_dt.date() > today_date and start_dt and start_dt.date() == today_date:
+            day_suffix = " (+1d)"
+
         title = show.get("title", "Unknown")
-        lines.append(f"{start}-{end} {title}")
+        lines.append(f"{day_prefix}{start}-{end}{day_suffix} {title}")
 
     return "\n".join(lines)
 
