@@ -40,54 +40,74 @@ def fetch_weather() -> str:
     return resp.text.strip()
 
 
-def fetch_schedule() -> str:
-    """Fetch today's schedule and format as a list of shows."""
-    now_utc = datetime.now(timezone.utc)
-    today_date = now_utc.date()
-    today = now_utc.strftime("%Y-%m-%d")
-    resp = httpx.get(
-        SCHEDULE_API_URL,
-        params={"time": today},
-        timeout=15,
-    )
+def _fetch_schedule_for(date_str: str) -> list:
+    resp = httpx.get(SCHEDULE_API_URL, params={"time": date_str}, timeout=15)
     resp.raise_for_status()
-    shows = resp.json()
+    return resp.json()
 
-    if not shows:
-        return "No shows scheduled today."
 
-    lines = []
-    for show in shows:
-        start_raw = show.get("startTimestampUTC", "")
-        end_raw = show.get("endTimestampUTC", "")
+def _format_show_line(show: dict) -> str:
+    start_raw = show.get("startTimestampUTC", "")
+    end_raw = show.get("endTimestampUTC", "")
+    try:
+        start = datetime.fromisoformat(start_raw).strftime("%H:%M")
+    except ValueError:
+        start = "?"
+    try:
+        end = datetime.fromisoformat(end_raw).strftime("%H:%M")
+    except ValueError:
+        end = "?"
+    title = show.get("title", "Unknown")
+    return f"{start}-{end} {title}"
+
+
+def fetch_schedule() -> str:
+    """Fetch shows in the 24h window from now to the next digest, grouped by day."""
+    now_utc = datetime.now(timezone.utc)
+    window_end = now_utc + timedelta(hours=24)
+    today_date = now_utc.date()
+
+    today_shows = _fetch_schedule_for(now_utc.strftime("%Y-%m-%d"))
+    tomorrow_shows = _fetch_schedule_for((now_utc + timedelta(days=1)).strftime("%Y-%m-%d"))
+
+    # combine, dedupe, keep only shows overlapping the [now, now+24h] window
+    seen = set()
+    candidates = []
+    for show in today_shows + tomorrow_shows:
+        sid = show.get("id") or show.get("uid")
+        if sid in seen:
+            continue
         try:
-            start_dt = datetime.fromisoformat(start_raw)
-            start = start_dt.strftime("%H:%M")
+            start_dt = datetime.fromisoformat(show.get("startTimestampUTC", ""))
+            end_dt = datetime.fromisoformat(show.get("endTimestampUTC", ""))
         except ValueError:
-            start_dt = None
-            start = "?"
-        try:
-            end_dt = datetime.fromisoformat(end_raw)
-            end = end_dt.strftime("%H:%M")
-        except ValueError:
-            end_dt = None
-            end = "?"
+            continue
+        if end_dt <= now_utc or start_dt >= window_end:
+            continue
+        seen.add(sid)
+        candidates.append((start_dt, end_dt, show))
 
-        # label shows that span midnight
-        day_prefix = ""
-        if start_dt and start_dt.date() < today_date:
-            day_prefix = "(yesterday) "
-        elif start_dt and start_dt.date() > today_date:
-            day_prefix = "(tomorrow) "
+    candidates.sort(key=lambda c: c[0])
 
-        day_suffix = ""
-        if end_dt and end_dt.date() > today_date and start_dt and start_dt.date() == today_date:
-            day_suffix = " (+1d)"
+    today_lines = []
+    tomorrow_lines = []
+    for start_dt, _end_dt, show in candidates:
+        line = _format_show_line(show)
+        if start_dt.date() <= today_date:
+            today_lines.append(line)
+        else:
+            tomorrow_lines.append(line)
 
-        title = show.get("title", "Unknown")
-        lines.append(f"{day_prefix}{start}-{end}{day_suffix} {title}")
+    if not today_lines and not tomorrow_lines:
+        return "No shows scheduled in the next 24 hours."
 
-    return "\n".join(lines)
+    # only show day headers when both groups have content
+    if today_lines and tomorrow_lines:
+        return (
+            "<b>today:</b>\n" + "\n".join(today_lines) +
+            "\n\n<b>tomorrow (morning):</b>\n" + "\n".join(tomorrow_lines)
+        )
+    return "\n".join(today_lines or tomorrow_lines)
 
 
 def send_telegram_message(text: str) -> None:
@@ -113,7 +133,7 @@ def main() -> None:
     schedule = fetch_schedule()
     fortune = random_chunted_fortune()
 
-    message = f"gm!\n\n<b>today's weather:</b>\n{weather}\n\n<b>today's schedule (UTC):</b>\n{schedule}\n\nremember: <i>{fortune}</i>"
+    message = f"gm!\n\n<b>today's weather:</b>\n{weather}\n\n<b>next 24h (UTC):</b>\n{schedule}\n\nremember: <i>{fortune}</i>"
 
     send_telegram_message(message)
     log.info("Done.")
