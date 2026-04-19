@@ -35,9 +35,13 @@ UK_TZ = timezone(timedelta(hours=0))  # UTC; BST handled by schedule API's dateU
 def fetch_weather() -> str:
     """Fetch compact weather string from wttr.in."""
     url = f"https://wttr.in/{WEATHER_LOCATION}?format=%C+%t+%w"
-    resp = httpx.get(url, timeout=15, follow_redirects=True)
-    resp.raise_for_status()
-    return resp.text.strip()
+    try:
+        resp = httpx.get(url, timeout=15, follow_redirects=True)
+        resp.raise_for_status()
+        return resp.text.strip()
+    except httpx.HTTPError as exc:
+        log.warning("Weather fetch failed: %s", exc)
+        return "(weather unavailable)"
 
 
 def _fetch_schedule_for(date_str: str) -> list:
