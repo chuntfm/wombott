@@ -151,7 +151,7 @@ def main() -> None:
     chunt_epoch = datetime(2022, 3, 14, tzinfo=timezone.utc)
     chunt_number = (datetime.now(timezone.utc) - chunt_epoch).days
 
-    message = f"gm! today is chunt{chunt_number}\n\n<b>today's weather:</b>\n{weather}\n\n<b>next 24h (UTC):</b>\n{schedule}\n\nremember: <i>{fortune}</i>"
+    message = f"gm, today is chunt{chunt_number}!\n\n<b>today's weather:</b>\n{weather}\n\n<b>next 24h (UTC):</b>\n{schedule}\n\nremember: <i>{fortune}</i>"
 
     send_telegram_message(message)
     log.info("Done.")
