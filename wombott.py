@@ -164,7 +164,7 @@ def check_archive() -> None:
         return
 
     # post oldest first so channel reads chronologically
-    new_entries.sort(key=lambda e: e.get("info", {}).get("date", ""))
+    new_entries.sort(key=lambda e: e.get("created_time", ""))
     for entry in new_entries:
         log.info("New archive entry: %s", entry.get("name"))
         send_telegram_message(format_archive_message(entry))
