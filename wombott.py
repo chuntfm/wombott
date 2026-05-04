@@ -137,14 +137,16 @@ def format_archive_message(entry: dict) -> str:
     return ARCHIVE_MESSAGE_TEMPLATE.format(show=show_block)
 
 
-def read_last_archive_url() -> Optional[str]:
+def read_posted_archive_urls() -> set:
     if ARCHIVE_STATE_FILE.exists():
-        return ARCHIVE_STATE_FILE.read_text().strip() or None
-    return None
+        text = ARCHIVE_STATE_FILE.read_text().strip()
+        if text:
+            return set(text.splitlines())
+    return set()
 
 
-def write_last_archive_url(url: str) -> None:
-    ARCHIVE_STATE_FILE.write_text(url)
+def write_posted_archive_urls(urls: set) -> None:
+    ARCHIVE_STATE_FILE.write_text("\n".join(sorted(urls)))
 
 
 def check_archive() -> None:
@@ -153,7 +155,7 @@ def check_archive() -> None:
     archive = resp.json()
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=ARCHIVE_LOOKBACK_HOURS)
-    last_posted_url = read_last_archive_url()
+    posted_urls = read_posted_archive_urls()
 
     # filter to recent shows within lookback window
     recent = []
@@ -166,27 +168,26 @@ def check_archive() -> None:
         except ValueError:
             continue
         if entry_date < cutoff:
-            break  # list is sorted newest-first, so we can stop
+            continue
         recent.append(entry)
 
-    # find entries newer than the last posted one
-    new_entries = []
-    for entry in recent:
-        if entry.get("url") == last_posted_url:
-            break
-        new_entries.append(entry)
+    # find entries not yet posted
+    new_entries = [e for e in recent if e.get("url") and e["url"] not in posted_urls]
 
     if not new_entries:
         log.info("No new archive entries.")
         return
 
     # post oldest first so channel reads chronologically
-    for entry in reversed(new_entries):
+    new_entries.sort(key=lambda e: e.get("info", {}).get("date", ""))
+    for entry in new_entries:
         log.info("New archive entry: %s", entry.get("name"))
         send_telegram_message(format_archive_message(entry))
 
-    # save the newest one as last posted
-    write_last_archive_url(new_entries[0]["url"])
+    # update state: current posted urls + new ones, pruned to recent only
+    recent_urls = {e["url"] for e in recent if e.get("url")}
+    posted_urls = (posted_urls & recent_urls) | {e["url"] for e in new_entries}
+    write_posted_archive_urls(posted_urls)
 
 
 def send_telegram_message(text: str) -> None:
