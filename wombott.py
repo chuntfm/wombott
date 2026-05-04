@@ -41,7 +41,6 @@ ARCHIVE_URL = os.getenv(
     "ARCHIVE_URL", "https://assets.chunt.org/mixcloud_archive.slim.json"
 )
 ARCHIVE_CHECK_INTERVAL = int(os.getenv("ARCHIVE_CHECK_INTERVAL", "3600"))
-ARCHIVE_LOOKBACK_HOURS = int(os.getenv("ARCHIVE_LOOKBACK_HOURS", "48"))
 ARCHIVE_STATE_FILE = Path(os.getenv("ARCHIVE_STATE_FILE", ".wombott_last_archive"))
 DEFAULT_ARCHIVE_TEMPLATE = "{show}"
 ARCHIVE_MESSAGE_TEMPLATE = os.getenv("ARCHIVE_MESSAGE_TEMPLATE", DEFAULT_ARCHIVE_TEMPLATE).replace(
@@ -154,25 +153,11 @@ def check_archive() -> None:
     resp.raise_for_status()
     archive = resp.json()
 
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=ARCHIVE_LOOKBACK_HOURS)
     posted_urls = read_posted_archive_urls()
 
-    # filter to recent shows within lookback window
-    recent = []
-    for entry in archive:
-        date_str = entry.get("info", {}).get("date")
-        if not date_str:
-            continue
-        try:
-            entry_date = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        except ValueError:
-            continue
-        if entry_date < cutoff:
-            continue
-        recent.append(entry)
-
     # find entries not yet posted
-    new_entries = [e for e in recent if e.get("url") and e["url"] not in posted_urls]
+    all_urls = {e["url"] for e in archive if e.get("url")}
+    new_entries = [e for e in archive if e.get("url") and e["url"] not in posted_urls]
 
     if not new_entries:
         log.info("No new archive entries.")
@@ -184,9 +169,8 @@ def check_archive() -> None:
         log.info("New archive entry: %s", entry.get("name"))
         send_telegram_message(format_archive_message(entry))
 
-    # update state: current posted urls + new ones, pruned to recent only
-    recent_urls = {e["url"] for e in recent if e.get("url")}
-    posted_urls = (posted_urls & recent_urls) | {e["url"] for e in new_entries}
+    # update state: all archive urls (auto-prunes removed entries)
+    posted_urls = (posted_urls & all_urls) | {e["url"] for e in new_entries}
     write_posted_archive_urls(posted_urls)
 
 
