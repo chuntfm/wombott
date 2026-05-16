@@ -32,13 +32,26 @@ SCHEDULE_API_URL = os.getenv("SCHEDULE_API_URL", "https://api.chunt.org/schedule
 UK_TZ = timezone(timedelta(hours=0))  # UTC; BST handled by schedule API's dateUK field
 
 
+_CHUNTY_REPLACEMENTS = [
+    "cloudy", "sunny", "rainy", "foggy", "misty", "snowy", "stormy",
+]
+
+
+def _chuntify_weather(text: str) -> str:
+    """Replace weather condition words with 'chunty'."""
+    import re
+    for word in _CHUNTY_REPLACEMENTS:
+        text = re.sub(rf"\b{word}\b", "chunty", text, flags=re.IGNORECASE)
+    return text
+
+
 def fetch_weather() -> str:
     """Fetch compact weather string from wttr.in."""
     url = f"https://wttr.in/{WEATHER_LOCATION}?format=%C+%t+%w"
     try:
         resp = httpx.get(url, timeout=15, follow_redirects=True)
         resp.raise_for_status()
-        return resp.text.strip()
+        return _chuntify_weather(resp.text.strip())
     except httpx.HTTPError as exc:
         log.warning("Weather fetch failed: %s", exc)
         return "(weather unavailable)"
