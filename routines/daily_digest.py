@@ -71,19 +71,24 @@ def fetch_schedule() -> str:
     window_end = now_utc + timedelta(hours=24)
     today_date = now_utc.date()
 
+    fetch_failed = False
     try:
         today_shows = _fetch_schedule_for(now_utc.strftime("%Y-%m-%d"))
     except httpx.HTTPError as exc:
         log.warning("Schedule fetch failed (today): %s", exc)
         today_shows = []
+        fetch_failed = True
     try:
         tomorrow_shows = _fetch_schedule_for((now_utc + timedelta(days=1)).strftime("%Y-%m-%d"))
     except httpx.HTTPError as exc:
         log.warning("Schedule fetch failed (tomorrow): %s", exc)
         tomorrow_shows = []
+        fetch_failed = True
 
     if not today_shows and not tomorrow_shows:
-        return "(schedule unavailable)"
+        if fetch_failed:
+            return "(schedule unavailable)"
+        return "No shows scheduled in the next 24 hours."
 
     # combine, dedupe, keep only shows overlapping the [now, now+24h] window
     seen = set()
